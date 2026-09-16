@@ -1,0 +1,20 @@
+/* Visual-only enhancement. Source wording and original interactions are retained. */
+:root{--edge-blue:#196da9;--edge-navy:#143750;--edge-paper:#f2f7fb;--edge-line:#d5e3ed;--edge-focus:#2679b8;scroll-behavior:smooth;scroll-padding-top:105px}
+body{accent-color:var(--edge-blue)}
+::selection{background:#c7e4fa;color:#102b42}
+a,button,input,select,summary{touch-action:manipulation}
+a:focus-visible,button:focus-visible,summary:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid #459ce0!important;outline-offset:5px!important}
+[data-edge-first] :is(h1,h2){color:#13354f!important;text-shadow:0 1px 12px #ffffffb8!important}
+[data-edge-first] p{color:#22465f!important}
+[data-edge-first] svg text{fill:#15364d!important;filter:drop-shadow(0 1px 4px #fff)}
+[data-edge-photo]{filter:saturate(.85)!important}
+#edge-toolbar{position:fixed;right:18px;bottom:18px;z-index:10000;display:flex;align-items:center;gap:8px;padding:7px;border:1px solid #d8e5ef;border-radius:999px;background:#ffffffed;color:#17374f;box-shadow:0 8px 30px #12344d22;backdrop-filter:blur(12px);font:600 13px/1.4 system-ui,sans-serif}
+#edge-toolbar button,#edge-toolbar select{font:inherit;background:white;color:#17374f;border:1px solid #d6e5ef;border-radius:999px;padding:10px 14px;min-height:42px;cursor:pointer}
+#edge-toolbar button:hover,#edge-toolbar select:hover{background:#e9f3fa}
+#edge-progress{position:fixed;left:0;top:0;height:3px;z-index:10001;width:0;background:#2c87c7;pointer-events:none;transition:width .1s linear}
+#edge-preview-note{border:0;border-radius:18px;max-width:430px;padding:25px;box-shadow:0 22px 90px #061c3e66;color:#17374f;background:white;font:15px/1.6 system-ui,sans-serif}
+#edge-preview-note::backdrop{background:#102b4266}
+#edge-preview-note button{border:0;border-radius:8px;padding:10px 17px;background:#176ca5;color:white;font:600 14px system-ui;cursor:pointer;margin-right:8px}
+@media(max-width:600px){#edge-toolbar{right:10px;bottom:10px;gap:5px;padding:5px}#edge-toolbar button,#edge-toolbar select{padding:9px 11px}body{padding-bottom:60px}}
+@media(prefers-reduced-motion:reduce){:root{scroll-behavior:auto}*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+@media print{#edge-toolbar,#edge-progress{display:none!important}}
