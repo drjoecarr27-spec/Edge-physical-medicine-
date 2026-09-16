@@ -1,0 +1,25 @@
+name: Visual preview assets
+on:
+  push:
+    paths:
+      - '.github/workflows/visual-preview.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Get the public preview source
+        run: git clone --depth 1 https://github.com/drjoecarr27-spec/Edge-physical-medicine-.git site
+      - name: Snapshot the approved public website for visual testing
+        working-directory: site
+        run: node server.mjs --snapshot
+      - name: Retain assets for visual QA
+        uses: actions/upload-artifact@v7
+        with:
+          name: edge-visual-assets
+          path: site/snapshot/
+          retention-days: 3
+          if-no-files-found: error
