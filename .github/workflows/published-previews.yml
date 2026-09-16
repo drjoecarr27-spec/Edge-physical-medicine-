@@ -1,0 +1,36 @@
+name: Published visual previews
+on:
+  push:
+    paths: ['.github/workflows/published-previews.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  previews:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Read the published visual preview
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p previews
+          base='https://edge-physical-medicine-web-production.up.railway.app'
+          ready=0
+          for n in $(seq 1 45); do
+            if curl -fsS --max-time 8 "$base/_edge/theme.css?review=$n-$(date +%s)" | grep -Fq '.chapter footer{background:transparent'; then ready=1; break; fi
+            sleep 4
+          done
+          test "$ready" = 1
+          curl -fsS --retry 3 --max-time 20 "$base/health?review=$(date +%s)" -o previews/health.json
+          curl -fsS --retry 3 --max-time 20 "$base/_edge/browser-check.json?review=$(date +%s)" -o previews/browser-check.json
+          for name in desktop mobile chapter-04 chapter-06 chapter-08 services; do
+            curl -fsS --retry 3 --max-time 20 "$base/_edge/preview-$name.jpg?review=$(date +%s)" -o "previews/$name.jpg"
+          done
+      - name: Save actual published screenshots
+        uses: actions/upload-artifact@v7
+        with:
+          name: edge-published-previews
+          path: previews/
+          retention-days: 3
+          if-no-files-found: error
