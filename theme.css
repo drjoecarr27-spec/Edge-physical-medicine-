@@ -61,6 +61,9 @@ a,button,input,select,summary{touch-action:manipulation}
 #chapter-10 .stage-inner>.abs[style*='opacity']{text-shadow:none!important}
 footer,.site-footer{background:#edf4fa!important;color:#31546d!important;border-top:1px solid #d6e3ed!important}
 footer .logo-word,footer .logo-desc{color:#173950!important}
+/* Chapter footers are transparent overlay canvases, not page footer surfaces. */
+.chapter footer{background:transparent!important;border:0!important}
+.chapter section[aria-labelledby="ch04-summary"],.chapter section[aria-labelledby="ch04-summary-m"]{opacity:1!important}
 #edge-toolbar{position:fixed;right:18px;bottom:18px;z-index:10000;display:flex;align-items:center;gap:7px;padding:6px;border:1px solid #d1e0eb;border-radius:999px;background:#fffffff2;color:#17374f;box-shadow:0 8px 30px #12344d20;backdrop-filter:blur(12px);font:600 13px/1.4 system-ui,sans-serif}
 #edge-toolbar button,#edge-toolbar select{font:inherit;background:white;color:#17374f;border:1px solid #d6e5ef;border-radius:999px;padding:10px 14px;min-height:42px;cursor:pointer}
 #edge-toolbar button:hover,#edge-toolbar select:hover{background:#e9f3fa}
