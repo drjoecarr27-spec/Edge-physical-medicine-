@@ -1,5 +1,5 @@
 import http from 'node:http';
-import {mkdir,readFile,writeFile,stat} from 'node:fs/promises';
+import {mkdir,readFile,writeFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import path from 'node:path';
 
@@ -25,7 +25,7 @@ async function fetchSource(url,headers={}){
  return {data,type:r.headers.get('content-type')||'application/octet-stream'};
 }
 function discover(s,base,type){
- const out=new Set();const add=v=>{try{const u=new URL(decode(v),base);if(u.origin===SOURCE&&!u.pathname.startsWith('/api/')&&!u.pathname.startsWith('/_vercel/')){u.hash='';if(!u.searchParams.has('_rsc'))out.add(u.pathname+u.search);}}catch{}};
+ const out=new Set();const add=v=>{try{if(v.startsWith('%23')||v.startsWith('#')||v.startsWith('data:'))return;const u=new URL(decode(v),base);if(u.origin===SOURCE&&!u.pathname.startsWith('/api/')&&!u.pathname.startsWith('/_vercel/')){u.hash='';if(!u.searchParams.has('_rsc'))out.add(u.pathname+u.search);}}catch{}};
  if(type.includes('html')){for(const m of s.matchAll(/\b(?:href|src|poster)=["']([^"']+)["']/g))add(m[1]);for(const m of s.matchAll(/\bsrcset=["']([^"']+)["']/g))for(const p of m[1].split(','))add(p.trim().split(/\s+/)[0]);}
  if(type.includes('css'))for(const m of s.matchAll(/url\(["']?([^\s)"']+)["']?\)/g))add(m[1]);
  if(type.includes('javascript')||type.includes('html'))for(const m of s.matchAll(/["'](\/(?:edge|images|_next\/static)\/[^"'\s<>]+\.(?:webp|png|jpg|jpeg|svg|woff2|js|css))["']/g))add(m[1]);
@@ -60,11 +60,12 @@ async function start(){
   res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','strict-origin-when-cross-origin');
   if(!['GET','HEAD'].includes(req.method)){res.writeHead(405,{'Content-Type':'text/plain','Allow':'GET, HEAD'});res.end('This independent visual preview does not submit patient information.');return;}
   const send=(data,type,status=200)=>{res.writeHead(status,{'Content-Type':type,'Cache-Control':type.includes('html')?'no-store':'public, max-age=3600'});res.end(req.method==='HEAD'?undefined:data);};
-  if(name==='/health'){send(JSON.stringify({status:'ok',version:'original-content-corolla-v1',pages:audit.pages.length,contentPreserved:audit.textPreservation}),'application/json');return;}
+  if(name==='/health'){send(JSON.stringify({status:'ok',version:'original-content-corolla-v2',pages:audit.pages.length,contentPreserved:audit.textPreservation}),'application/json');return;}
   if(name==='/_edge/theme.css'){send(theme,'text/css; charset=utf-8');return;}
   if(name==='/_edge/enhance.js'){send(enhanced,'application/javascript; charset=utf-8');return;}
   if(name==='/_edge/corolla.webp'||HERO.test(name)){send(image,'image/webp');return;}
-  if(name==='/_edge/audit.json'||name==='/_edge/inspect.json'){send(await readFile(path.join(ROOT,name.endsWith('audit.json')?'audit.json':'inspect.json')),'application/json');return;}
+  if(name==='/_edge/audit.json'||name==='/_edge/inspect.json'||name==='/_edge/browser-check.json'){const f=name.split('/').pop();const value=await readFile(path.join(ROOT,f),'utf8');send(f==='inspect.json'?value.replaceAll('<','[LT]').replaceAll('>','[GT]'):value,'application/json');return;}
+  if(/^\/_edge\/preview-(desktop|mobile)\.jpg$/.test(name)){send(await readFile(path.join(ROOT,name.split('/').pop())),'image/jpeg');return;}
   if(name.startsWith('/api/')||name.startsWith('/_vercel/')){send('Not available in the independent visual preview','text/plain',404);return;}
   if(name==='/_next/image'){const original=url.searchParams.get('url');if(original&&HERO.test(original)){send(image,'image/webp');return;}}
   const route=name+url.search;
