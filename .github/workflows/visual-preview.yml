@@ -11,15 +11,29 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 6
     steps:
-      - name: Get the public preview source
-        run: git clone --depth 1 https://github.com/drjoecarr27-spec/Edge-physical-medicine-.git site
-      - name: Snapshot the approved public website for visual testing
-        working-directory: site
-        run: node server.mjs --snapshot
-      - name: Retain assets for visual QA
+      - name: Capture the deployed visual preview artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p preview
+          BASE='https://edge-physical-medicine-web-production.up.railway.app'
+          ready=0
+          for attempt in $(seq 1 25); do
+            if curl --fail --silent --show-error --max-time 12 "$BASE/health" > preview/health.json && jq -e '.version == "clinic-daylight-v3"' preview/health.json >/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 6
+          done
+          test "$ready" = 1
+          for item in browser-check.json visual-manifest.json preview-desktop.jpg preview-mobile.jpg preview-services.jpg preview-chapter-02.jpg preview-chapter-03.jpg preview-chapter-04.jpg preview-chapter-05.jpg preview-chapter-06.jpg preview-chapter-07.jpg preview-chapter-08.jpg preview-chapter-09.jpg preview-chapter-10.jpg preview-chapter-11.jpg; do
+            curl --fail --silent --show-error --max-time 25 "$BASE/_edge/$item" -o "preview/$item"
+          done
+          jq '{version, contentPreservation, pagesVerified, newPhotographs, viewports: [.viewports[] | {name, toolbar, overflow, brokenVisibleImages, meanRGB, errors}]}' preview/browser-check.json
+      - name: Retain actual screenshots for visual QA
         uses: actions/upload-artifact@v7
         with:
-          name: edge-visual-assets
-          path: site/snapshot/
+          name: edge-daylight-preview
+          path: preview/
           retention-days: 3
           if-no-files-found: error
