@@ -1,0 +1,66 @@
+name: Got your back reel voice
+on:
+  push:
+    branches: [promo-reel-20260921]
+    paths: ['.github/workflows/reel-got-your-back.yml']
+permissions:
+  contents: read
+jobs:
+  voice:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      OMP_NUM_THREADS: '2'
+      OPENBLAS_NUM_THREADS: '2'
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install open-source narration renderer
+        run: |
+          sudo apt-get -qq update
+          sudo apt-get -qq install -y espeak-ng libsndfile1
+          python -m pip install -q kokoro-onnx soundfile requests
+      - name: Render medical-evidence message
+        run: |
+          mkdir -p output
+          python - <<'PY'
+          import requests, pathlib, json, numpy as np, soundfile as sf
+          from kokoro_onnx import Kokoro
+          for name in ['kokoro-v1.0.onnx','voices-v1.0.bin']:
+            with requests.get('https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/'+name,timeout=(20,120),stream=True) as r:
+              r.raise_for_status()
+              with open(name,'wb') as f:
+                for b in r.iter_content(1048576): f.write(b)
+          engine=Kokoro('kokoro-v1.0.onnx','voices-v1.0.bin')
+          lines=[
+            ('01-hook','Injured in a car accident?',0.98,0.22),
+            ('02-lowball','When an insurance company tries to lowball your claim, your attorney needs medical evidence to push back. Hard.',1.02,0.35),
+            ('03-edge','At Edge Physical Medicine, we combine personalized care, advanced diagnostic technology, and rigorous clinical documentation.',1.02,0.20),
+            ('04-testing','From comprehensive examinations to X-rays and MRI studies when medically indicated, our multidisciplinary team documents your injuries and how they affect your life.',1.03,0.24),
+            ('05-records','With your authorization, we provide records and medical explanations to your attorney and insurance adjusters.',1.02,0.20),
+            ('06-experts','When appropriate, our physicians provide medical expert opinions and expert-witness testimony.',1.02,0.28),
+            ('07-findings','When your injuries are questioned, we stand behind our clinical findings.',1.0,0.25),
+            ('08-case','Your injuries. Your evidence. Your case.',0.98,0.30),
+            ('09-back',"We've got your back. Literally, too.",0.96,0.42),
+            ('10-action','Get evaluated. Get it documented. Message us today.',1.0,0.28),
+            ('11-locations','Rose Lawn. Western Hills. Edge Physical Medicine.',0.99,0.80)
+          ]
+          timing=[]
+          for key,text,speed,pause in lines:
+            audio,sr=engine.create(text,voice='am_michael',speed=speed,lang='en-us')
+            audio=np.asarray(audio,dtype=np.float32)
+            active=np.flatnonzero(np.abs(audio)>.0015)
+            if len(active):audio=audio[max(0,active[0]-int(.07*sr)):min(len(audio),active[-1]+int(.17*sr))]
+            sf.write('output/'+key+'.wav',audio,sr,subtype='PCM_16')
+            timing.append({'key':key,'text':text,'file':key+'.wav','duration':len(audio)/sr,'pause':pause,'speed':speed,'voice':'am_michael'})
+          pathlib.Path('output/timing.json').write_text(json.dumps(timing,indent=2))
+          pathlib.Path('output/script.txt').write_text('\n\n'.join(t for _,t,_,_ in lines)+'\n\nSynthetic English voice preset am_michael; no voice cloning or paid speech service. User-confirmed multidisciplinary imaging and expert-witness services. No promise of payout or legal representation.\n')
+          print(json.dumps({'duration':sum(x['duration']+x['pause'] for x in timing),'lines':timing}))
+          PY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: edge-got-your-back-voice
+          path: output/
+          retention-days: 7
+          if-no-files-found: error
