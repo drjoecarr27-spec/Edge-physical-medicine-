@@ -1,0 +1,50 @@
+name: Reel extra real shots
+on:
+  push:
+    branches: [promo-reel-20260921]
+    paths: ['.github/workflows/reel-extra-shots.yml']
+permissions:
+  contents: read
+jobs:
+  clips:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Download and trim stock clips
+        run: |
+          sudo apt-get -qq update && sudo apt-get -qq install -y ffmpeg
+          mkdir -p extra-shots
+          python3 - <<'PY'
+          import urllib.request,pathlib,concurrent.futures,json,subprocess
+          out=pathlib.Path('extra-shots')
+          jobs=[('road',8996085,['hd_1920_1080_30fps','uhd_3840_2160_30fps'],'https://www.pexels.com/video/vehicles-on-the-road-at-daytime-8996085/'),('rehab',6023220,['hd_1920_1080_25fps','hd_1920_1080_30fps','hd_1080_1920_25fps'],'https://www.pexels.com/video/a-man-exercising-with-a-personal-trainer-6023220/'),('lab',8381577,['hd_1080_1920_25fps','hd_1080_1920_30fps','hd_1920_1080_25fps'],'https://www.pexels.com/video/a-rotating-blood-mixer-in-a-lab-8381577/'),('knee',6095386,['hd_1920_1080_25fps','hd_1920_1080_30fps','hd_1080_1920_25fps'],'https://www.pexels.com/video/therapist-applying-kinesiology-tape-on-patient-6095386/')]
+          def get(job):
+            key,vid,formats,page=job
+            errors=[]
+            for fmt in formats:
+              url=f'https://videos.pexels.com/video-files/{vid}/{vid}-{fmt}.mp4'
+              p=out/(key+'-source.mp4');dest=out/(key+'.mp4')
+              try:
+                req=urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0'})
+                with urllib.request.urlopen(req,timeout=25) as r,open(p,'wb') as f:
+                  if 'video' not in r.headers.get('Content-Type',''):raise ValueError('Not video')
+                  while True:
+                    b=r.read(1048576)
+                    if not b:break
+                    f.write(b)
+                subprocess.run(['ffmpeg','-v','error','-y','-i',str(p),'-t','8','-vf','scale=1920:1920:force_original_aspect_ratio=decrease:force_divisible_by=2,fps=30,setsar=1','-an','-c:v','libx264','-threads','2','-preset','fast','-crf','21','-movflags','+faststart',str(dest)],check=True)
+                p.unlink();return {'key':key,'page':page,'url':url,'ok':True,'bytes':dest.stat().st_size}
+              except Exception as e:
+                errors.append(str(e))
+                if p.exists():p.unlink()
+            return {'key':key,'page':page,'ok':False,'errors':errors}
+          with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:records=list(pool.map(get,jobs))
+          (out/'sources.json').write_text(json.dumps({'assets':records,'license':'https://www.pexels.com/license/','usage':'Illustrative stock footage, not real clinic staff, patients, or locations.'},indent=2))
+          print(json.dumps(records))
+          PY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: edge-extra-real-shots
+          path: extra-shots/
+          retention-days: 7
+          if-no-files-found: error
