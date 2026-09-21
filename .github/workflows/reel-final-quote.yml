@@ -1,0 +1,55 @@
+name: Reel final quote
+on:
+  push:
+    branches: [promo-reel-20260921]
+    paths: ['.github/workflows/reel-final-quote.yml']
+permissions:
+  contents: read
+jobs:
+  voice:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      OMP_NUM_THREADS: '2'
+      OPENBLAS_NUM_THREADS: '2'
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prepare speech
+        run: |
+          sudo apt-get -qq update
+          sudo apt-get -qq install -y espeak-ng libsndfile1
+          python -m pip install -q kokoro-onnx soundfile requests
+      - name: Record quote
+        run: |
+          mkdir -p quote-audio
+          python - <<'PY'
+          import requests, pathlib, json
+          import numpy as np, soundfile as sf
+          from kokoro_onnx import Kokoro
+          for name in ['kokoro-v1.0.onnx','voices-v1.0.bin']:
+            u='https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/'+name
+            with requests.get(u,timeout=120,stream=True) as r:
+              r.raise_for_status()
+              with open(name,'wb') as f:
+                for b in r.iter_content(1048576): f.write(b)
+          engine=Kokoro('kokoro-v1.0.onnx','voices-v1.0.bin')
+          lines=[('next-steps','The steps you take next can influence your recovery and how your injury claim is valued.'),('comparative-fault','Your share of fault can reduce or prevent compensation.')]
+          timing=[]
+          for key,text in lines:
+            audio,sr=engine.create(text,voice='af_sarah',speed=1.02,lang='en-us')
+            audio=np.asarray(audio,dtype=np.float32)
+            active=np.flatnonzero(np.abs(audio)>.0015)
+            if len(active):audio=audio[max(0,active[0]-int(.06*sr)):min(len(audio),active[-1]+int(.14*sr))]
+            sf.write('quote-audio/'+key+'.wav',audio,sr,subtype='PCM_16')
+            timing.append({'key':key,'text':text,'file':key+'.wav','duration':len(audio)/sr})
+          pathlib.Path('quote-audio/timing.json').write_text(json.dumps(timing,indent=2))
+          print(json.dumps(timing))
+          PY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: edge-final-quote-audio
+          path: quote-audio/
+          retention-days: 7
+          if-no-files-found: error
