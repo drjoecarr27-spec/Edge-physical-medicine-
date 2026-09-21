@@ -1,0 +1,58 @@
+name: Intersection motion preview
+on:
+  push:
+    branches: [promo-reel-20260921]
+    paths: ['.github/workflows/reel-intersection-fast-preview.yml']
+permissions:
+  contents: read
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      OMP_NUM_THREADS: '3'
+      LIBGL_ALWAYS_SOFTWARE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install lightweight rendering tools
+        run: |
+          sudo apt-get -qq update
+          sudo apt-get -qq install -y blender xvfb ffmpeg python3-yaml
+      - name: Render same original scene as motion preview
+        run: |
+          mkdir -p output/frames
+          python3 - <<'PY'
+          import pathlib,yaml
+          data=yaml.safe_load(pathlib.Path('.github/workflows/reel-original-intersection-opening.yml').read_text())
+          run=data['jobs']['render']['steps'][1]['run']
+          code=run.split("cat > scene.py <<'PY'\n",1)[1].rsplit('\nPY\n',1)[0]
+          code=code.replace("try:scene.render.engine='BLENDER_EEVEE_NEXT'\nexcept:scene.render.engine='BLENDER_EEVEE'", "scene.render.engine='BLENDER_WORKBENCH'")
+          code=code.replace("scene.render.filepath='output/frames/'", """scene.display.shading.light='STUDIO'
+          scene.display.shading.color_type='MATERIAL'
+          scene.display.shading.show_shadows=True
+          scene.display.shading.show_cavity=True
+          scene.display.shading.cavity_type='BOTH'
+          scene.display.shading.curvature_ridge_factor=1.35
+          scene.display.shading.curvature_valley_factor=1.1
+          scene.display.shading.show_specular_highlight=True
+          scene.display.shading.background_type='WORLD'
+          scene.render.filepath='output/frames/'""")
+          pathlib.Path('scene-fast.py').write_text(code)
+          PY
+          xvfb-run -a blender -b -t 3 --python scene-fast.py > output/render.log 2>&1
+          ffmpeg -v error -y -framerate 30 -i output/frames/%04d.png -c:v libx264 -preset fast -crf 18 -pix_fmt yuv420p -movflags +faststart output/intersection-original.mp4
+          printf '%s\n' 'Original 3D motion preview. No footage from YouTube or real accident victims. Two generic cars approach an intersection and collide at frame 65; 99 frames at 30 fps.' > output/README.txt
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: edge-intersection-motion-preview
+          path: |
+            output/intersection-original.mp4
+            output/frames/0001.png
+            output/frames/0040.png
+            output/frames/0065.png
+            output/frames/0085.png
+            output/render.log
+            output/README.txt
+          retention-days: 7
+          if-no-files-found: error
