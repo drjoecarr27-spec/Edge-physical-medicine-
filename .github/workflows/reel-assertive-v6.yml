@@ -1,0 +1,84 @@
+name: Authoritative reel voice v6
+on:
+  push:
+    branches: [promo-reel-20260921]
+    paths: ['.github/workflows/reel-assertive-v6.yml']
+permissions:
+  contents: read
+jobs:
+  voice:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prepare audio tools
+        run: |
+          python -m pip install -q edge-tts requests soundfile
+          command -v ffmpeg >/dev/null || (sudo apt-get -qq update && sudo apt-get -qq install -y ffmpeg)
+      - name: Record new English narration and retain real photo sources
+        run: |
+          mkdir -p output/voice output/media
+          python - <<'PY'
+          import asyncio, pathlib, json, inspect, subprocess, requests, soundfile as sf
+          import edge_tts
+          out=pathlib.Path('output')
+          lines=[
+            ('01-hook','Injured in a car accident?',0.12),
+            ('02-lowball','When an insurance company tries to lowball your claim, your attorney needs medical evidence to push back.',0.16),
+            ('03-edge','At Edge Physical Medicine, we combine personalized care, advanced diagnostic technology, and rigorous clinical documentation.',0.14),
+            ('04-testing','From comprehensive examinations to X-rays and MRI studies when medically indicated, our multidisciplinary team documents your injuries and how they affect your life.',0.14),
+            ('05-records','With your authorization, we provide records and medical explanations to your attorney and insurance adjusters.',0.14),
+            ('06-experts','When appropriate, our physicians provide medical expert opinions and expert-witness testimony.',0.16),
+            ('07-findings','When your injuries are questioned, we stand behind our clinical findings.',0.18),
+            ('08-case','Your injuries. Your evidence. Your case.',0.14),
+            ('10-action','Get evaluated. Get it documented. Message us today.',0.15),
+            ('11-locations','Roselawn. Western Hills. Edge Physical Medicine.',0.70)
+          ]
+          async def speak(key,text,pause):
+            voice='en-US-ChristopherNeural'
+            kw=dict(text=text,voice=voice,rate='+4%',pitch='+0Hz',volume='+0%')
+            if 'boundary' in inspect.signature(edge_tts.Communicate).parameters:kw['boundary']='WordBoundary'
+            words=[]
+            for attempt in range(3):
+              try:
+                words=[]
+                with open(out/'voice'/f'{key}.mp3','wb') as f:
+                  async for c in edge_tts.Communicate(**kw).stream():
+                    if c['type']=='audio':f.write(c['data'])
+                    elif c['type']=='WordBoundary':words.append({'text':c['text'],'start':c['offset']/1e7,'end':(c['offset']+c['duration'])/1e7})
+                break
+              except Exception:
+                if attempt==2:raise
+                await asyncio.sleep(2)
+            p=out/'voice'/f'{key}.wav'
+            subprocess.run(['ffmpeg','-v','error','-y','-i',str(out/'voice'/f'{key}.mp3'),'-ar','48000','-ac','1',str(p)],check=True)
+            if not words:raise RuntimeError('Word boundaries required for synchronization')
+            return {'key':key,'text':text,'file':p.name,'duration':sf.info(p).duration,'pause':pause,'voice':voice,'rate':'+4%','words':words}
+          async def run():
+            result=[]
+            for key,text,pause in lines:
+              row=await asyncio.wait_for(speak(key,text,pause),60)
+              result.append(row)
+            return result
+          timing=asyncio.run(run())
+          (out/'voice'/'timing.json').write_text(json.dumps(timing,indent=2))
+          (out/'voice'/'script.txt').write_text('\n\n'.join(t for _,t,_ in lines))
+          sources=[]
+          photos=[('ambulance.jpg','https://images.pexels.com/photos/3719815/pexels-photo-3719815.jpeg?auto=compress&cs=tinysrgb&w=2000','https://www.pexels.com/photo/ambulance-on-the-road-3719815/'),('emergency-collision.jpg','https://images.unsplash.com/photo-1556086744-7502d61b1af5?auto=format&fit=max&w=2200&q=90','https://unsplash.com/photos/two-vehicle-collision-during-daytime-QXzXmFrcCic')]
+          for name,url,page in photos:
+            try:
+              r=requests.get(url,timeout=30,headers={'User-Agent':'Mozilla/5.0'});r.raise_for_status()
+              (out/'media'/name).write_bytes(r.content)
+              sources.append({'file':name,'url':url,'page':page,'ok':True,'bytes':len(r.content)})
+            except Exception as e:sources.append({'file':name,'page':page,'ok':False,'error':str(e)})
+          (out/'sources.json').write_text(json.dumps({'voice':'en-US-ChristopherNeural','rate':'+4%','pitch':'unchanged','voiceIsSynthetic':True,'noVoiceCloning':True,'noPaidSpeechService':True,'photos':sources,'note':'Stock photos illustrate emergency context; they are not clinic staff, premises or patients.'},indent=2))
+          print(json.dumps({'duration':sum(x['duration']+x['pause'] for x in timing),'rows':len(timing),'voice':'en-US-ChristopherNeural','photos':sources}))
+          PY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: edge-assertive-v6-voice
+          path: output/
+          retention-days: 7
+          if-no-files-found: error
