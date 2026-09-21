@@ -1,0 +1,75 @@
+name: Dynamic reel additional footage
+on:
+  push:
+    branches: [promo-reel-20260921]
+    paths: ['.github/workflows/reel-dynamic-assets.yml']
+permissions:
+  contents: read
+jobs:
+  media:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      OMP_NUM_THREADS: '2'
+      OPENBLAS_NUM_THREADS: '2'
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Dependencies
+        run: |
+          sudo apt-get -qq update
+          sudo apt-get -qq install -y espeak-ng libsndfile1 ffmpeg
+          python -m pip install -q kokoro-onnx soundfile requests
+      - name: Public media and additional narration
+        run: |
+          mkdir -p dynamic-assets
+          python - <<'PY'
+          import requests,pathlib,concurrent.futures,json,re,subprocess
+          out=pathlib.Path('dynamic-assets')
+          session=requests.Session();session.headers['User-Agent']='Mozilla/5.0'
+          def download(url,path,timeout=70):
+            with session.get(url,timeout=timeout,stream=True) as r:
+              r.raise_for_status()
+              if path.suffix=='.mp4' and 'video' not in r.headers.get('Content-Type',''):raise ValueError('Not video')
+              with open(path,'wb') as f:
+                for b in r.iter_content(1048576):f.write(b)
+            return path.stat().st_size
+          def video(item):
+            key,vid,formats=item
+            urls=[f'https://videos.pexels.com/video-files/{vid}/{vid}-{fmt}.mp4' for fmt in formats]
+            errors=[]
+            for u in urls:
+              try:
+                p=out/(key+'-source.mp4');download(u,p,25)
+                dest=out/(key+'.mp4')
+                subprocess.run(['ffmpeg','-v','error','-y','-i',str(p),'-t','10','-vf','scale=1280:1920:force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,fps=30','-an','-c:v','libx264','-preset','fast','-crf','20','-movflags','+faststart',str(dest)],check=True)
+                p.unlink();return {'key':key,'url':u,'bytes':dest.stat().st_size,'ok':True}
+              except Exception as e:errors.append(str(e))
+            return {'key':key,'ok':False,'errors':errors}
+          vitems=[('care-room',8313353,['hd_1920_1080_30fps','hd_1920_1080_25fps']),('notes',5998403,['hd_1080_1920_30fps','hd_1080_1920_25fps']),('doctor-record',8375665,['hd_1920_1080_25fps','hd_1920_1080_30fps']),('road',35186918,['hd_1080_1920_30fps','hd_1920_1080_30fps','hd_1920_1080_25fps'])]
+          with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:records=list(pool.map(video,vitems))
+          photo='https://images.pexels.com/photos/5214997/pexels-photo-5214997.jpeg?auto=compress&cs=tinysrgb&w=1800'
+          download(photo,out/'blood-pressure.jpg');records.append({'key':'blood-pressure','url':photo,'ok':True})
+          (out/'sources.json').write_text(json.dumps({'assets':records,'license':'https://www.pexels.com/license/','legalSource':'https://codes.ohio.gov/ohio-revised-code/section-2315.33','usage':'Illustrative stock scenes, not actual clinic staff or patients.'},indent=2))
+          print(json.dumps(records),flush=True)
+          for name in ['kokoro-v1.0.onnx','voices-v1.0.bin']:
+            download('https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/'+name,pathlib.Path(name),120)
+          import numpy as np,soundfile as sf
+          from kokoro_onnx import Kokoro
+          engine=Kokoro('kokoro-v1.0.onnx','voices-v1.0.bin')
+          lines=[('hook','Car accident in Ohio?'),('law-claim','In Ohio, if another driver is at fault for your injuries, you may have a claim.'),('law-fault','Your share of fault can affect recovery.')]
+          timing=[]
+          for key,text in lines:
+            audio,sr=engine.create(text,voice='af_sarah',speed=1.02,lang='en-us');audio=np.asarray(audio,dtype=np.float32)
+            active=np.flatnonzero(np.abs(audio)>.0015)
+            if len(active):audio=audio[max(0,active[0]-int(.06*sr)):min(len(audio),active[-1]+int(.14*sr))]
+            sf.write(out/(key+'.wav'),audio,sr,subtype='PCM_16');timing.append({'key':key,'text':text,'duration':len(audio)/sr})
+          (out/'timing.json').write_text(json.dumps(timing,indent=2));print(json.dumps(timing))
+          PY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: edge-dynamic-additions
+          path: dynamic-assets/
+          retention-days: 7
+          if-no-files-found: error
