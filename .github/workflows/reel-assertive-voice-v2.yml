@@ -1,0 +1,88 @@
+name: Assertive English reel narration
+on:
+  push:
+    branches: [promo-reel-20260921]
+    paths: ['.github/workflows/reel-assertive-voice-v2.yml']
+permissions:
+  contents: read
+jobs:
+  narration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      OMP_NUM_THREADS: '2'
+      OPENBLAS_NUM_THREADS: '2'
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install local open-source audio renderer
+        run: |
+          sudo apt-get -qq update
+          sudo apt-get -qq install -y espeak-ng libsndfile1 ffmpeg
+          python -m pip install -q kokoro-onnx soundfile requests
+      - name: Render original English narration and prepare illustrative licensed media
+        run: |
+          mkdir -p deliverable/voice deliverable/media
+          python - <<'PY'
+          import requests,pathlib,json,numpy as np,soundfile as sf,subprocess,concurrent.futures
+          from kokoro_onnx import Kokoro
+          out=pathlib.Path('deliverable')
+          def download(url,target):
+            with requests.get(url,timeout=(20,120),stream=True,headers={'User-Agent':'Mozilla/5.0'}) as r:
+              r.raise_for_status()
+              with open(target,'wb') as f:
+                for b in r.iter_content(1048576):f.write(b)
+          for name in ['kokoro-v1.0.onnx','voices-v1.0.bin']:
+            download('https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/'+name,name)
+          engine=Kokoro('kokoro-v1.0.onnx','voices-v1.0.bin')
+          lines=[
+            ('01-hook',"Injured in a car accident?",0.98,0.26),
+            ('02-evidence',"It's not just what you say hurts. It's what you can prove.",0.98,0.35),
+            ('03-transition',"That's where we come in.",0.99,0.2),
+            ('04-introduction',"At Edge Physical Medicine, personalized care is backed by rigorous clinical documentation.",1.02,0.22),
+            ('05-technology',"Our comprehensive post-accident evaluations use advanced diagnostic technology, including X-rays and MRI studies when medically indicated.",1.02,0.24),
+            ('06-team',"Care goes beyond chiropractic treatment. Our multidisciplinary approach brings together medical providers and specialists to assess your symptoms, injuries, and daily function.",1.02,0.28),
+            ('07-record',"From your initial examination through ongoing care, we document clinical findings, review diagnostic imaging, and build a clear medical record.",1.02,0.25),
+            ('08-personal',"You deserve to have your injuries taken seriously, with care that documents your experience clearly and thoroughly.",1.00,0.34),
+            ('09-yourcase',"Your injuries. Your case.",0.98,0.3),
+            ('10-action',"Get evaluated. Get it documented. Message us today to request your evaluation.",1.0,0.28),
+            ('11-locations',"Rose Lawn. Western Hills. Edge Physical Medicine.",0.98,0.65)
+          ]
+          timing=[]
+          for key,text,speed,pause in lines:
+            audio,sr=engine.create(text,voice='am_michael',speed=speed,lang='en-us')
+            audio=np.asarray(audio,dtype=np.float32)
+            active=np.flatnonzero(np.abs(audio)>.0015)
+            if len(active):audio=audio[max(0,active[0]-int(.065*sr)):min(len(audio),active[-1]+int(.16*sr))]
+            sf.write(out/'voice'/f'{key}.wav',audio,sr,subtype='PCM_16')
+            timing.append({'key':key,'text':text,'file':f'{key}.wav','duration':len(audio)/sr,'pause':pause,'voice':'am_michael','speed':speed})
+          (out/'voice'/'timing.json').write_text(json.dumps(timing,indent=2))
+          (out/'voice'/'script.txt').write_text('\n\n'.join(t for _,t,_,_ in lines)+'\n\nSynthetic English am_michael preset. No voice cloning. No paid speech service. No workplace-injury or comparative-fault content.\n')
+          media=[
+            ('collision.jpg','https://images.unsplash.com/photo-1556086744-7502d61b1af5?auto=format&fit=max&w=2200&q=88','https://unsplash.com/photos/two-vehicle-collision-during-daytime-QXzXmFrcCic'),
+            ('xray.mp4','https://videos.pexels.com/video-files/7579843/7579843-uhd_4096_2160_25fps.mp4','https://www.pexels.com/video/doctor-showing-the-x-ray-7579843/'),
+            ('mri.mp4','https://videos.pexels.com/video-files/7088472/7088472-uhd_2160_3840_25fps.mp4','https://www.pexels.com/video/a-doctor-and-a-sonographer-diagnosing-a-patient-mri-test-7088472/')
+          ]
+          def obtain(row):
+            name,url,page=row;dest=out/'media'/name
+            try:
+              download(url,dest)
+              if name.endswith('.mp4'):
+                temp=out/'media'/('edit-'+name)
+                subprocess.run(['ffmpeg','-v','error','-y','-threads','2','-ss','1','-i',str(dest),'-t','13','-vf','scale=1280:1280:force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,fps=30','-an','-c:v','libx264','-threads','2','-preset','veryfast','-crf','18','-movflags','+faststart',str(temp)],check=True)
+                temp.replace(dest)
+              return {'file':name,'source':url,'page':page,'bytes':dest.stat().st_size,'ok':True}
+            except Exception as e:
+              if dest.exists():dest.unlink()
+              return {'file':name,'page':page,'ok':False,'error':str(e)}
+          with concurrent.futures.ThreadPoolExecutor(max_workers=3) as p:records=list(p.map(obtain,media))
+          (out/'sources.json').write_text(json.dumps({'voice':'Kokoro am_michael synthetic preset','media':records,'licenses':['https://www.pexels.com/license/','https://unsplash.com/license'],'usage':'Illustrative stock footage, not actual clinic staff, patients or equipment. Service information supplied and approved by the user.'},indent=2))
+          print(json.dumps({'voiceSeconds':sum(t['duration']+t['pause'] for t in timing),'media':records}))
+          PY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: edge-assertive-voice-and-imaging
+          path: deliverable/
+          retention-days: 7
+          if-no-files-found: error
