@@ -1,0 +1,67 @@
+name: Short energetic reel narration v7
+on:
+  push:
+    branches: [promo-reel-20260921]
+    paths: ['.github/workflows/reel-short-punch-v7.yml']
+permissions:
+  contents: read
+jobs:
+  voice:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prepare speech tools
+        run: |
+          python -m pip install -q edge-tts soundfile
+          command -v ffmpeg >/dev/null || (sudo apt-get -qq update && sudo apt-get -qq install -y ffmpeg)
+      - name: Render short original ad narration
+        run: |
+          mkdir -p output
+          python - <<'PY'
+          import asyncio,json,pathlib,inspect,subprocess,soundfile as sf
+          import edge_tts
+          out=pathlib.Path('output')
+          lines=[
+            ('01-hook','Injured in a car accident?'),
+            ('02-evidence','When insurance tries to lowball your claim, push back with medical evidence.'),
+            ('03-care','At Edge Physical Medicine, comprehensive evaluations, X-rays and MRI when medically indicated help document your injuries.'),
+            ('04-record','Give your attorney a clear medical record.'),
+            ('05-action','Get evaluated. Get it documented. Message us today.'),
+            ('06-locations','Roselawn and Western Hills.')
+          ]
+          async def speak(key,text):
+            kw=dict(text=text,voice='en-US-ChristopherNeural',rate='+7%',pitch='+0Hz',volume='+0%')
+            if 'boundary' in inspect.signature(edge_tts.Communicate).parameters:kw['boundary']='WordBoundary'
+            for attempt in range(3):
+              try:
+                words=[]
+                with open(out/(key+'.mp3'),'wb') as f:
+                  async for c in edge_tts.Communicate(**kw).stream():
+                    if c['type']=='audio':f.write(c['data'])
+                    elif c['type']=='WordBoundary':words.append({'text':c['text'],'start':c['offset']/1e7,'end':(c['offset']+c['duration'])/1e7})
+                if not words:raise RuntimeError('Missing word timing')
+                break
+              except Exception:
+                if attempt==2:raise
+                await asyncio.sleep(2)
+            p=out/(key+'.wav')
+            subprocess.run(['ffmpeg','-v','error','-y','-i',str(out/(key+'.mp3')),'-ar','48000','-ac','1',str(p)],check=True)
+            return {'key':key,'text':text,'file':p.name,'duration':sf.info(p).duration,'voice':'en-US-ChristopherNeural','rate':'+7%','words':words}
+          async def main():
+            rows=[]
+            for key,text in lines:rows.append(await asyncio.wait_for(speak(key,text),60))
+            return rows
+          rows=asyncio.run(main())
+          (out/'timing.json').write_text(json.dumps(rows,indent=2))
+          (out/'script.txt').write_text('\n\n'.join(t for _,t in lines))
+          print(json.dumps({'spokenSeconds':sum(x['duration'] for x in rows),'voice':'en-US-ChristopherNeural','wordCount':sum(len(t.split()) for _,t in lines),'noPaidSpeechService':True}))
+          PY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: edge-short-punch-v7
+          path: output/
+          retention-days: 7
+          if-no-files-found: error
