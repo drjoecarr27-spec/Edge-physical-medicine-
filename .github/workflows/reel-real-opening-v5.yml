@@ -1,0 +1,59 @@
+name: Real opening and smooth voice v5
+on:
+  push:
+    branches: [promo-reel-20260921]
+    paths: ['.github/workflows/reel-real-opening-v5.yml']
+permissions:
+  contents: read
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prepare editing tools
+        run: |
+          python -m pip install -q edge-tts requests
+          command -v ffmpeg || (sudo apt-get -qq update && sudo apt-get -qq install -y ffmpeg)
+      - name: Prepare replacement footage and spoken line
+        run: |
+          mkdir -p output
+          python - <<'PY'
+          import requests,pathlib,concurrent.futures,json,asyncio,inspect,subprocess
+          out=pathlib.Path('output')
+          media=[('real-collision-pixabay.mp4','https://cdn.pixabay.com/video/2017/06/11/9781-221163251_large.mp4','https://pixabay.com/videos/car-accident-police-9781/'),('real-wreck-pexels.mp4','https://videos.pexels.com/video-files/3974558/3974558-hd_1920_1080_30fps.mp4','https://www.pexels.com/video/a-wrecked-car-on-the-street-3974558/')]
+          def obtain(row):
+              name,url,page=row
+              try:
+                  with requests.get(url,timeout=(15,60),stream=True) as r:
+                      r.raise_for_status()
+                      with open(out/name,'wb') as f:
+                          for chunk in r.iter_content(1048576): f.write(chunk)
+                  return {'file':name,'url':url,'page':page,'ok':True}
+              except Exception as e:return {'file':name,'page':page,'ok':False,'error':str(e)}
+          with concurrent.futures.ThreadPoolExecutor(max_workers=2) as p:records=list(p.map(obtain,media))
+          (out/'sources.json').write_text(json.dumps(records,indent=2))
+          import edge_tts
+          text='When an insurance company tries to lowball your claim, your attorney needs medical evidence to push back.'
+          async def speak():
+              kw={'text':text,'voice':'en-US-AndrewMultilingualNeural','rate':'+0%','pitch':'+0Hz','volume':'+0%'}
+              if 'boundary' in inspect.signature(edge_tts.Communicate).parameters:kw['boundary']='WordBoundary'
+              words=[]
+              with open(out/'lowball-no-hard.mp3','wb') as f:
+                  async for c in edge_tts.Communicate(**kw).stream():
+                      if c['type']=='audio':f.write(c['data'])
+                      elif c['type'] in ('WordBoundary','SentenceBoundary'):words.append({'text':c['text'],'start':c['offset']/10000000,'end':(c['offset']+c['duration'])/10000000})
+              subprocess.run(['ffmpeg','-v','error','-y','-i',str(out/'lowball-no-hard.mp3'),'-ac','1','-ar','24000',str(out/'lowball-no-hard.wav')],check=True)
+              (out/'lowball-timing.json').write_text(json.dumps({'text':text,'voice':'en-US-AndrewMultilingualNeural','words':words},indent=2))
+          try:asyncio.run(asyncio.wait_for(speak(),timeout=65))
+          except Exception as e:(out/'voice-error.txt').write_text(str(e))
+          print(json.dumps(records))
+          PY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: edge-real-opening-v5
+          path: output/
+          retention-days: 7
+          if-no-files-found: error
