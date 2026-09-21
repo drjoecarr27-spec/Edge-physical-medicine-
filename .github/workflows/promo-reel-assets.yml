@@ -1,0 +1,55 @@
+name: Clinic reel asset preparation
+on:
+  push:
+    branches: [promo-reel-20260921]
+    paths: ['.github/workflows/promo-reel-assets.yml']
+permissions:
+  contents: read
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Collect public licensed media
+        run: |
+          mkdir -p reel-assets
+          python3 - <<'PY'
+          import urllib.request, pathlib, concurrent.futures, json, subprocess
+          out=pathlib.Path('reel-assets')
+          items={
+            'consultation.jpg':'https://images.pexels.com/photos/7579831/pexels-photo-7579831.jpeg?auto=compress&cs=tinysrgb&w=1600',
+            'assessment.jpg':'https://images.pexels.com/photos/20860589/pexels-photo-20860589.jpeg?auto=compress&cs=tinysrgb&w=1600',
+            'recovery.jpg':'https://images.pexels.com/photos/6129043/pexels-photo-6129043.jpeg?auto=compress&cs=tinysrgb&w=1600',
+            'movement.jpg':'https://images.pexels.com/photos/8972498/pexels-photo-8972498.jpeg?auto=compress&cs=tinysrgb&w=1600',
+            'consultation-video.mp4':'https://videos.pexels.com/video-files/7579840/7579840-uhd_2160_4096_25fps.mp4',
+            'discussion-video.mp4':'https://videos.pexels.com/video-files/7659205/7659205-hd_1080_1920_25fps.mp4'
+          }
+          def get(pair):
+            name,url=pair
+            try:
+              req=urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0'})
+              with urllib.request.urlopen(req,timeout=50) as r:
+                data=r.read(120000000)
+                if len(data)<1000: raise ValueError('Response too small')
+              (out/name).write_bytes(data)
+              return {'file':name,'url':url,'bytes':len(data),'ok':True}
+            except Exception as e:return {'file':name,'url':url,'error':str(e),'ok':False}
+          with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool: records=list(pool.map(get,items.items()))
+          (out/'sources.json').write_text(json.dumps({'license':'https://www.pexels.com/license/','usage':'Illustrative stock footage only; not actual clinic staff or patients.','assets':records},indent=2))
+          print(json.dumps(records))
+          PY
+      - name: Reduce footage to edit-ready excerpts
+        run: |
+          if ! command -v ffmpeg >/dev/null; then sudo apt-get -qq update && sudo apt-get -qq install -y ffmpeg; fi
+          for src in consultation-video discussion-video; do
+            if [ -f "reel-assets/$src.mp4" ]; then
+              ffmpeg -v error -y -ss 2 -i "reel-assets/$src.mp4" -t 10 -vf "scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,setsar=1,fps=30" -an -c:v libx264 -preset veryfast -crf 18 -movflags +faststart "reel-assets/$src-edit.mp4" && rm "reel-assets/$src.mp4"
+            fi
+          done
+      - name: Retain media for reel editing
+        uses: actions/upload-artifact@v7
+        with:
+          name: edge-reel-media
+          path: reel-assets/
+          retention-days: 7
+          if-no-files-found: error
