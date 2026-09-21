@@ -1,0 +1,114 @@
+name: Natural narration and synchronized reel assets
+on:
+  push:
+    branches: [promo-reel-20260921]
+    paths: ['.github/workflows/reel-natural-sync-v4.yml']
+permissions:
+  contents: read
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    env:
+      OMP_NUM_THREADS: '2'
+      OPENBLAS_NUM_THREADS: '2'
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prepare voice tools
+        run: |
+          sudo apt-get -qq update
+          sudo apt-get -qq install -y ffmpeg espeak-ng libsndfile1
+          python -m pip install -q edge-tts soundfile requests kokoro-onnx faster-whisper beautifulsoup4
+      - name: Generate voice, timestamps and licensed alternative opening photographs
+        run: |
+          mkdir -p output/voice output/media
+          python - <<'PY'
+          import asyncio, pathlib, json, requests, subprocess, inspect, concurrent.futures
+          import numpy as np, soundfile as sf
+          import edge_tts
+          from bs4 import BeautifulSoup
+          out=pathlib.Path('output')
+          lines=[
+            ('01-hook','Injured in a car accident?',0.25),
+            ('02-lowball','When an insurance company tries to lowball your claim, your attorney needs medical evidence to push back. Hard.',0.28),
+            ('03-edge','At Edge Physical Medicine, we combine personalized care, advanced diagnostic technology, and rigorous clinical documentation.',0.20),
+            ('04-testing','From comprehensive examinations to X-rays and MRI studies when medically indicated, our multidisciplinary team documents your injuries and how they affect your life.',0.22),
+            ('05-records','With your authorization, we provide records and medical explanations to your attorney and insurance adjusters.',0.20),
+            ('06-experts','When appropriate, our physicians provide medical expert opinions and expert-witness testimony.',0.24),
+            ('07-findings','When your injuries are questioned, we stand behind our clinical findings.',0.24),
+            ('08-case','Your injuries. Your evidence. Your case.',0.22),
+            ('10-action','Get evaluated. Get it documented. Message us today.',0.24),
+            ('11-locations','Roselawn. Western Hills. Edge Physical Medicine.',0.75)
+          ]
+          def get(url,path):
+            with requests.get(url,timeout=(12,90),stream=True,headers={'User-Agent':'Mozilla/5.0'}) as r:
+              r.raise_for_status()
+              with open(path,'wb') as f:
+                for b in r.iter_content(1048576):f.write(b)
+          async def speak(key,text,voice):
+            kw=dict(text=text,voice=voice,rate='+0%',volume='+0%',pitch='+0Hz')
+            if 'boundary' in inspect.signature(edge_tts.Communicate).parameters:kw['boundary']='WordBoundary'
+            words=[]
+            with open(out/'voice'/f'{key}.mp3','wb') as f:
+              async for c in edge_tts.Communicate(**kw).stream():
+                if c['type']=='audio':f.write(c['data'])
+                elif c['type'] in ('WordBoundary','SentenceBoundary'):
+                  words.append({'text':c['text'],'start':c['offset']/10000000,'end':(c['offset']+c['duration'])/10000000,'kind':c['type']})
+            p=out/'voice'/f'{key}.wav'
+            subprocess.run(['ffmpeg','-v','error','-y','-i',str(out/'voice'/f'{key}.mp3'),'-ar','24000','-ac','1',str(p)],check=True)
+            return words
+          async def neural():
+            chosen='en-US-AndrewMultilingualNeural'
+            timing=[]
+            for key,text,pause in lines:
+              words=await asyncio.wait_for(speak(key,text,chosen),timeout=45)
+              timing.append({'key':key,'text':text,'file':key+'.wav','duration':sf.info(out/'voice'/f'{key}.wav').duration,'pause':pause,'voice':chosen,'words':words})
+            return timing,chosen
+          try:
+            timing,voice=asyncio.run(neural())
+          except Exception as e:
+            print('NEURAL_SERVICE_UNAVAILABLE',str(e)[:300],flush=True)
+            from kokoro_onnx import Kokoro
+            for name in ['kokoro-v1.0.onnx','voices-v1.0.bin']:
+              get('https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/'+name,name)
+            engine=Kokoro('kokoro-v1.0.onnx','voices-v1.0.bin');voice='af_heart';timing=[]
+            for key,text,pause in lines:
+              audio,sr=engine.create(text,voice=voice,speed=1.00,lang='en-us')
+              audio=np.asarray(audio,dtype=np.float32);active=np.flatnonzero(np.abs(audio)>.001)
+              if len(active):audio=audio[max(0,active[0]-int(.08*sr)):min(len(audio),active[-1]+int(.18*sr))]
+              sf.write(out/'voice'/f'{key}.wav',audio,sr,subtype='PCM_16')
+              timing.append({'key':key,'text':text,'file':key+'.wav','duration':len(audio)/sr,'pause':pause,'voice':voice,'words':[]})
+          if any(not row['words'] or row['words'][0]['kind']!='WordBoundary' for row in timing):
+            from faster_whisper import WhisperModel
+            model=WhisperModel('base.en',device='cpu',compute_type='int8',cpu_threads=2)
+            for row in timing:
+              segs,info=model.transcribe(str(out/'voice'/row['file']),language='en',word_timestamps=True,beam_size=3,initial_prompt=row['text'])
+              row['words']=[{'text':w.word.strip(),'start':w.start,'end':w.end,'kind':'alignment'} for s in segs for w in s.words]
+          (out/'voice'/'timing.json').write_text(json.dumps(timing,indent=2))
+          (out/'voice'/'script.txt').write_text('\n\n'.join(t for _,t,_ in lines)+'\n\nSynthetic stock voice, not a cloned person. Voice: '+voice+'\n')
+          photos=[
+            ('collision-red.jpg','https://images.unsplash.com/photo-1673187139233-a574680b06f6?auto=format&fit=max&w=2400&q=90','https://unsplash.com/photos/a-red-car-is-parked-next-to-a-silver-car-4kEdYrfMOzU'),
+            ('collision-two.jpg',None,'https://unsplash.com/photos/two-cars-parked-next-to-each-other-in-a-parking-lot-cbXfPEOc1-k'),
+            ('collision-detail.jpg',None,'https://unsplash.com/photos/a-car-that-has-been-hit-by-another-car-xlxeGeh1DY4')
+          ]
+          def obtain(row):
+            name,url,page=row
+            try:
+              if not url:
+                r=requests.get(page,headers={'User-Agent':'Mozilla/5.0'},timeout=25);r.raise_for_status();soup=BeautifulSoup(r.text,'html.parser')
+                el=soup.select_one('meta[property="og:image"]');url=el['content']
+              get(url,out/'media'/name)
+              return {'name':name,'url':url,'page':page,'ok':True}
+            except Exception as e:return {'name':name,'page':page,'ok':False,'error':str(e)}
+          with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:results=list(pool.map(obtain,photos))
+          (out/'sources.json').write_text(json.dumps({'media':results,'license':'https://unsplash.com/license','youtubeReference':'https://youtu.be/3qNjt04bpQM','youtubeFootageReused':False,'voice':voice,'noPaidSpeechService':True},indent=2))
+          print('READY',json.dumps({'voice':voice,'seconds':sum(x['duration']+x['pause'] for x in timing),'photos':results}),flush=True)
+          PY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: edge-natural-sync-v4
+          path: output/
+          retention-days: 7
+          if-no-files-found: error
